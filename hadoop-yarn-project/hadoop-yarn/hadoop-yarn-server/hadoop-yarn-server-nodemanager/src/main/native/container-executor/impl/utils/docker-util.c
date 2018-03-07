@@ -17,6 +17,7 @@
  */
 
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -73,6 +74,47 @@ static int add_param_to_command(const struct configuration *command_config, cons
   return ret;
 }
 
+int check_trusted_image(const struct configuration *command_config, const struct configuration *conf) {
+  int found = 0;
+  int i = 0;
+  int ret = 0;
+  char *image_name = get_configuration_value("image", DOCKER_COMMAND_FILE_SECTION, command_config);
+  char **privileged_registry = get_configuration_values_delimiter("docker.privileged-containers.registries", CONTAINER_EXECUTOR_CFG_DOCKER_SECTION, conf, ",");
+  char *registry_ptr = NULL;
+  if (image_name == NULL) {
+    ret = INVALID_DOCKER_IMAGE_NAME;
+    goto free_and_exit;
+  }
+  if (privileged_registry != NULL) {
+    for (i = 0; privileged_registry[i] != NULL; i++) {
+      int len = strlen(privileged_registry[i]);
+      if (privileged_registry[i][len - 1] != '/') {
+        registry_ptr = (char *) alloc_and_clear_memory(len + 2, sizeof(char));
+        strncpy(registry_ptr, privileged_registry[i], len);
+        registry_ptr[len] = '/';
+        registry_ptr[len + 1] = '\0';
+      } else {
+        registry_ptr = strdup(privileged_registry[i]);
+      }
+      if (strncmp(image_name, registry_ptr, strlen(registry_ptr))==0) {
+        found=1;
+        free(registry_ptr);
+        break;
+      }
+      free(registry_ptr);
+    }
+  }
+  if (found==0) {
+    fprintf(ERRORFILE, "image: %s is not trusted.\n", image_name);
+    ret = INVALID_DOCKER_IMAGE_TRUST;
+  }
+  free(image_name);
+
+  free_and_exit:
+  free(privileged_registry);
+  return ret;
+}
+
 static int add_param_to_command_if_allowed(const struct configuration *command_config,
                                            const struct configuration *executor_cfg,
                                            const char *key, const char *allowed_key, const char *param,
@@ -99,6 +141,14 @@ static int add_param_to_command_if_allowed(const struct configuration *command_c
   }
 
   if (values != NULL) {
+    // Disable capabilities, devices if image is not trusted.
+    if (strcmp(key, "net") != 0) {
+      if (check_trusted_image(command_config, executor_cfg) != 0) {
+        fprintf(ERRORFILE, "Disable %s for untrusted image\n", key);
+        return INVALID_DOCKER_IMAGE_TRUST;
+      }
+    }
+
     if (permitted_values != NULL) {
       for (i = 0; values[i] != NULL; ++i) {
         memset(tmp_buffer, 0, tmp_buffer_size);
@@ -217,6 +267,12 @@ const char *get_docker_error_message(const int error_code) {
       return "Invalid docker volume name";
     case INVALID_DOCKER_VOLUME_COMMAND:
       return "Invalid docker volume command";
+    case PID_HOST_DISABLED:
+      return "Host pid namespace is disabled";
+    case INVALID_PID_NAMESPACE:
+      return "Invalid pid namespace";
+    case INVALID_DOCKER_IMAGE_TRUST:
+      return "Docker image is not trusted";
     default:
       return "Unknown error";
   }
@@ -253,6 +309,8 @@ int get_docker_command(const char *command_file, const struct configuration *con
   char *command = get_configuration_value("docker-command", DOCKER_COMMAND_FILE_SECTION, &command_config);
   if (strcmp(DOCKER_INSPECT_COMMAND, command) == 0) {
     return get_docker_inspect_command(command_file, conf, out, outlen);
+  } else if (strcmp(DOCKER_KILL_COMMAND, command) == 0) {
+    return get_docker_kill_command(command_file, conf, out, outlen);
   } else if (strcmp(DOCKER_LOAD_COMMAND, command) == 0) {
     return get_docker_load_command(command_file, conf, out, outlen);
   } else if (strcmp(DOCKER_PULL_COMMAND, command) == 0) {
@@ -661,6 +719,66 @@ int get_docker_stop_command(const char *command_file, const struct configuration
   return BUFFER_TOO_SMALL;
 }
 
+int get_docker_kill_command(const char *command_file, const struct configuration *conf,
+                            char *out, const size_t outlen) {
+  int ret = 0;
+  size_t len = 0, i = 0;
+  char *value = NULL;
+  char *container_name = NULL;
+  struct configuration command_config = {0, NULL};
+  ret = read_and_verify_command_file(command_file, DOCKER_KILL_COMMAND, &command_config);
+  if (ret != 0) {
+    return ret;
+  }
+
+  container_name = get_configuration_value("name", DOCKER_COMMAND_FILE_SECTION, &command_config);
+  if (container_name == NULL || validate_container_name(container_name) != 0) {
+    return INVALID_DOCKER_CONTAINER_NAME;
+  }
+
+  memset(out, 0, outlen);
+
+  ret = add_docker_config_param(&command_config, out, outlen);
+  if (ret != 0) {
+    return BUFFER_TOO_SMALL;
+  }
+
+  ret = add_to_buffer(out, outlen, DOCKER_KILL_COMMAND);
+  if (ret == 0) {
+    value = get_configuration_value("signal", DOCKER_COMMAND_FILE_SECTION, &command_config);
+    if (value != NULL) {
+      len = strlen(value);
+      for (i = 0; i < len; ++i) {
+        if (isupper(value[i]) == 0) {
+          fprintf(ERRORFILE, "Value for signal contains non-uppercase characters '%s'\n", value);
+          free(container_name);
+          memset(out, 0, outlen);
+          return INVALID_DOCKER_KILL_COMMAND;
+        }
+      }
+      ret = add_to_buffer(out, outlen, " --signal=");
+      if (ret == 0) {
+        ret = add_to_buffer(out, outlen, value);
+      }
+      if (ret != 0) {
+        free(container_name);
+        return BUFFER_TOO_SMALL;
+      }
+    }
+    ret = add_to_buffer(out, outlen, " ");
+    if (ret == 0) {
+      ret = add_to_buffer(out, outlen, container_name);
+    }
+    free(container_name);
+    if (ret != 0) {
+      return BUFFER_TOO_SMALL;
+    }
+    return 0;
+  }
+  free(container_name);
+  return BUFFER_TOO_SMALL;
+}
+
 static int detach_container(const struct configuration *command_config, char *out, const size_t outlen) {
   return add_param_to_command(command_config, "detach", "-d ", 0, out, outlen);
 }
@@ -686,6 +804,14 @@ static int set_group_add(const struct configuration *command_config, char *out, 
   char **group_add = get_configuration_values_delimiter("group-add", DOCKER_COMMAND_FILE_SECTION, command_config, ",");
   size_t tmp_buffer_size = 4096;
   char *tmp_buffer = NULL;
+  char *privileged = NULL;
+
+  privileged = get_configuration_value("privileged", DOCKER_COMMAND_FILE_SECTION, command_config);
+  if (privileged != NULL && strcasecmp(privileged, "true") == 0 ) {
+    free(privileged);
+    return ret;
+  }
+  free(privileged);
 
   if (group_add != NULL) {
     for (i = 0; group_add[i] != NULL; ++i) {
@@ -717,6 +843,52 @@ static int set_network(const struct configuration *command_config,
   return ret;
 }
 
+static int set_pid_namespace(const struct configuration *command_config,
+                   const struct configuration *conf, char *out,
+                   const size_t outlen) {
+  size_t tmp_buffer_size = 1024;
+  char *tmp_buffer = (char *) alloc_and_clear_memory(tmp_buffer_size, sizeof(char));
+  char *value = get_configuration_value("pid", DOCKER_COMMAND_FILE_SECTION,
+      command_config);
+  char *pid_host_enabled = get_configuration_value("docker.host-pid-namespace.enabled",
+      CONTAINER_EXECUTOR_CFG_DOCKER_SECTION, conf);
+  int ret = 0;
+
+  if (value != NULL) {
+    if (strcmp(value, "host") == 0) {
+      if (pid_host_enabled != NULL) {
+        if (strcmp(pid_host_enabled, "1") == 0 ||
+            strcasecmp(pid_host_enabled, "True") == 0) {
+          ret = add_to_buffer(out, outlen, "--pid='host' ");
+          if (ret != 0) {
+            ret = BUFFER_TOO_SMALL;
+          }
+        } else {
+          fprintf(ERRORFILE, "Host pid namespace is disabled\n");
+          ret = PID_HOST_DISABLED;
+          goto free_and_exit;
+        }
+      } else {
+        fprintf(ERRORFILE, "Host pid namespace is disabled\n");
+        ret = PID_HOST_DISABLED;
+        goto free_and_exit;
+      }
+    } else {
+      fprintf(ERRORFILE, "Invalid pid namespace\n");
+      ret = INVALID_PID_NAMESPACE;
+    }
+  }
+
+  free_and_exit:
+  free(tmp_buffer);
+  free(value);
+  free(pid_host_enabled);
+  if (ret != 0) {
+    memset(out, 0, outlen);
+  }
+  return ret;
+}
+
 static int set_capabilities(const struct configuration *command_config,
                             const struct configuration *conf, char *out,
                             const size_t outlen) {
@@ -727,14 +899,22 @@ static int set_capabilities(const struct configuration *command_config,
   if (ret != 0) {
     return BUFFER_TOO_SMALL;
   }
+
   ret = add_param_to_command_if_allowed(command_config, conf, "cap-add",
                                         "docker.allowed.capabilities",
                                         "--cap-add=", 1, 0,
                                         out, outlen);
-  if (ret != 0) {
-    fprintf(ERRORFILE, "Invalid docker capability requested\n");
-    ret = INVALID_DOCKER_CAPABILITY;
-    memset(out, 0, outlen);
+  switch (ret) {
+    case 0:
+      break;
+    case INVALID_DOCKER_IMAGE_TRUST:
+      fprintf(ERRORFILE, "Docker capability disabled for untrusted image\n");
+      ret = 0;
+      break;
+    default:
+      fprintf(ERRORFILE, "Invalid docker capability requested\n");
+      ret = INVALID_DOCKER_CAPABILITY;
+      memset(out, 0, outlen);
   }
 
   return ret;
@@ -886,6 +1066,19 @@ static int add_mounts(const struct configuration *command_config, const struct c
   }
 
   if (values != NULL) {
+    // Disable mount volumes if image is not trusted.
+    if (check_trusted_image(command_config, conf) != 0) {
+      fprintf(ERRORFILE, "Disable mount volume for untrusted image\n");
+      // YARN will implicitly bind node manager local directory to
+      // docker image.  This can create file system security holes,
+      // if docker container has binary to escalate privileges.
+      // For untrusted image, we drop mounting without reporting
+      // INVALID_DOCKER_MOUNT messages to allow running untrusted
+      // image in a sandbox.
+      ret = 0;
+      goto free_and_exit;
+    }
+
     ret = normalize_mounts(permitted_ro_mounts);
     ret |= normalize_mounts(permitted_rw_mounts);
     if (ret != 0) {
@@ -983,9 +1176,16 @@ static int set_privileged(const struct configuration *command_config, const stru
       = get_configuration_value("docker.privileged-containers.enabled", CONTAINER_EXECUTOR_CFG_DOCKER_SECTION, conf);
   int ret = 0;
 
-  if (value != NULL && strcmp(value, "true") == 0) {
+  if (value != NULL && strcasecmp(value, "true") == 0 ) {
     if (privileged_container_enabled != NULL) {
-      if (strcmp(privileged_container_enabled, "1") == 0) {
+      if (strcmp(privileged_container_enabled, "1") == 0 ||
+          strcasecmp(privileged_container_enabled, "True") == 0) {
+        // Disable set privileged if image is not trusted.
+        if (check_trusted_image(command_config, conf) != 0) {
+          fprintf(ERRORFILE, "Privileged containers are disabled from untrusted source\n");
+          ret = PRIVILEGED_CONTAINERS_DISABLED;
+          goto free_and_exit;
+        }
         ret = add_to_buffer(out, outlen, "--privileged ");
         if (ret != 0) {
           ret = BUFFER_TOO_SMALL;
@@ -1018,6 +1218,7 @@ int get_docker_run_command(const char *command_file, const struct configuration 
   size_t tmp_buffer_size = 1024;
   char *tmp_buffer = NULL;
   char **launch_command = NULL;
+  char *privileged = NULL;
   struct configuration command_config = {0, NULL};
   ret = read_and_verify_command_file(command_file, DOCKER_RUN_COMMAND, &command_config);
   if (ret != 0) {
@@ -1057,12 +1258,17 @@ int get_docker_run_command(const char *command_file, const struct configuration 
   }
   memset(tmp_buffer, 0, tmp_buffer_size);
 
-  quote_and_append_arg(&tmp_buffer, &tmp_buffer_size, "--user=", user);
-  ret = add_to_buffer(out, outlen, tmp_buffer);
-  if (ret != 0) {
-    return BUFFER_TOO_SMALL;
+  privileged = get_configuration_value("privileged", DOCKER_COMMAND_FILE_SECTION, &command_config);
+
+  if (privileged == NULL || strcasecmp(privileged, "false") == 0) {
+      quote_and_append_arg(&tmp_buffer, &tmp_buffer_size, "--user=", user);
+      ret = add_to_buffer(out, outlen, tmp_buffer);
+      if (ret != 0) {
+        return BUFFER_TOO_SMALL;
+      }
+      memset(tmp_buffer, 0, tmp_buffer_size);
   }
-  memset(tmp_buffer, 0, tmp_buffer_size);
+  free(privileged);
 
   ret = detach_container(&command_config, out, outlen);
   if (ret != 0) {
@@ -1080,6 +1286,11 @@ int get_docker_run_command(const char *command_file, const struct configuration 
   }
 
   ret = set_network(&command_config, conf, out, outlen);
+  if (ret != 0) {
+    return ret;
+  }
+
+  ret = set_pid_namespace(&command_config, conf, out, outlen);
   if (ret != 0) {
     return ret;
   }
@@ -1132,6 +1343,11 @@ int get_docker_run_command(const char *command_file, const struct configuration 
 
   launch_command = get_configuration_values_delimiter("launch-command", DOCKER_COMMAND_FILE_SECTION, &command_config,
                                                       ",");
+
+  if (check_trusted_image(&command_config, conf) != 0) {
+    launch_command = NULL;
+  }
+
   if (launch_command != NULL) {
     for (i = 0; launch_command[i] != NULL; ++i) {
       memset(tmp_buffer, 0, tmp_buffer_size);

@@ -37,6 +37,7 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FSDataOutputStreamBuilder;
 import org.apache.hadoop.fs.FSLinkResolver;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileChecksum;
 import org.apache.hadoop.fs.FileEncryptionInfo;
 import org.apache.hadoop.fs.FileStatus;
@@ -1994,9 +1995,115 @@ public class DistributedFileSystem extends FileSystem
     }.resolve(this, absF);
   }
 
+  /**
+   * Returns a remote iterator so that followup calls are made on demand
+   * while consuming the SnapshotDiffReportListing entries.
+   * This reduces memory consumption overhead in case the snapshotDiffReport
+   * is huge.
+   *
+   * @param snapshotDir
+   *          full path of the directory where snapshots are taken
+   * @param fromSnapshot
+   *          snapshot name of the from point. Null indicates the current
+   *          tree
+   * @param toSnapshot
+   *          snapshot name of the to point. Null indicates the current
+   *          tree.
+   * @return Remote iterator
+   */
+  public RemoteIterator
+      <SnapshotDiffReportListing> snapshotDiffReportListingRemoteIterator(
+      final Path snapshotDir, final String fromSnapshot,
+      final String toSnapshot) throws IOException {
+    Path absF = fixRelativePart(snapshotDir);
+    return new FileSystemLinkResolver
+        <RemoteIterator<SnapshotDiffReportListing>>() {
+      @Override
+      public RemoteIterator<SnapshotDiffReportListing> doCall(final Path p)
+          throws IOException {
+        if (!isValidSnapshotName(fromSnapshot) || !isValidSnapshotName(
+            toSnapshot)) {
+          throw new UnsupportedOperationException("Remote Iterator is"
+              + "supported for snapshotDiffReport between two snapshots");
+        }
+        return new SnapshotDiffReportListingIterator(getPathName(p),
+            fromSnapshot, toSnapshot);
+      }
+
+      @Override
+      public RemoteIterator<SnapshotDiffReportListing> next(final FileSystem fs,
+          final Path p) throws IOException {
+        return ((DistributedFileSystem) fs)
+            .snapshotDiffReportListingRemoteIterator(p, fromSnapshot,
+                toSnapshot);
+      }
+    }.resolve(this, absF);
+
+  }
+
+  /**
+   * This class defines an iterator that returns
+   * the SnapshotDiffReportListing for a snapshottable directory
+   * between two given snapshots.
+   */
+  private final class SnapshotDiffReportListingIterator implements
+      RemoteIterator<SnapshotDiffReportListing> {
+    private final String snapshotDir;
+    private final String fromSnapshot;
+    private final String toSnapshot;
+
+    private byte[] startPath;
+    private int index;
+    private boolean hasNext = true;
+
+    private SnapshotDiffReportListingIterator(String snapshotDir,
+        String fromSnapshot, String toSnapshot) {
+      this.snapshotDir = snapshotDir;
+      this.fromSnapshot = fromSnapshot;
+      this.toSnapshot = toSnapshot;
+      this.startPath = DFSUtilClient.EMPTY_BYTES;
+      this.index = -1;
+    }
+
+    @Override
+    public boolean hasNext() {
+      return hasNext;
+    }
+
+    @Override
+    public SnapshotDiffReportListing next() throws IOException {
+      if (!hasNext) {
+        throw new java.util.NoSuchElementException(
+            "No more entry in SnapshotDiffReport for " + snapshotDir);
+      }
+      final SnapshotDiffReportListing part =
+          dfs.getSnapshotDiffReportListing(snapshotDir, fromSnapshot,
+              toSnapshot, startPath, index);
+      startPath = part.getLastPath();
+      index = part.getLastIndex();
+      hasNext =
+          !(Arrays.equals(startPath, DFSUtilClient.EMPTY_BYTES) && index == -1);
+      return part;
+    }
+  }
+
+  private boolean isValidSnapshotName(String snapshotName) {
+    // If any of the snapshots specified in the getSnapshotDiffReport call
+    // is null or empty, it points to the current tree.
+    return (snapshotName != null && !snapshotName.isEmpty());
+  }
+
   private SnapshotDiffReport getSnapshotDiffReportInternal(
       final String snapshotDir, final String fromSnapshot,
       final String toSnapshot) throws IOException {
+    // In case the diff needs to be computed between a snapshot and the current
+    // tree, we should not do iterative diffReport computation as the iterative
+    // approach might fail if in between the rpc calls the current tree
+    // changes in absence of the global fsn lock.
+    if (!isValidSnapshotName(fromSnapshot) || !isValidSnapshotName(
+        toSnapshot)) {
+      return dfs.getSnapshotDiffReport(snapshotDir, fromSnapshot, toSnapshot);
+    }
     byte[] startPath = DFSUtilClient.EMPTY_BYTES;
     int index = -1;
     SnapshotDiffReportGenerator snapshotDiffReport;
@@ -2492,6 +2599,70 @@ public class DistributedFileSystem extends FileSystem
                 + " -> " + p);
       }
     }.resolve(this, absF);
+  }
+
+  /* HDFS only */
+  public void provisionEZTrash(final Path path,
+      final FsPermission trashPermission) throws IOException {
+    Path absF = fixRelativePart(path);
+    new FileSystemLinkResolver<Void>() {
+      @Override
+      public Void doCall(Path p) throws IOException {
+        provisionEZTrash(getPathName(p), trashPermission);
+        return null;
+      }
+
+      @Override
+      public Void next(FileSystem fs, Path p) throws IOException {
+        if (fs instanceof DistributedFileSystem) {
+          DistributedFileSystem myDfs = (DistributedFileSystem)fs;
+          myDfs.provisionEZTrash(p, trashPermission);
+          return null;
+        }
+        throw new UnsupportedOperationException("Cannot provisionEZTrash " +
+            "through a symlink to a non-DistributedFileSystem: " + fs + " -> "
+            + p);
+      }
+    }.resolve(this, absF);
+  }
+
+  private void provisionEZTrash(String path, FsPermission trashPermission)
+      throws IOException {
+    // make sure the path is an EZ
+    EncryptionZone ez = dfs.getEZForPath(path);
+    if (ez == null) {
+      throw new IllegalArgumentException(path + " is not an encryption zone.");
+    }
+
+    String ezPath = ez.getPath();
+    if (!path.toString().equals(ezPath)) {
+      throw new IllegalArgumentException(path + " is not the root of an " +
+          "encryption zone. Do you mean " + ez.getPath() + "?");
+    }
+
+    // check if the trash directory exists
+    Path trashPath = new Path(ez.getPath(), FileSystem.TRASH_PREFIX);
+    try {
+      FileStatus trashFileStatus = getFileStatus(trashPath);
+      String errMessage = "Will not provision new trash directory for " +
+          "encryption zone " + ez.getPath() + ". Path already exists.";
+      if (!trashFileStatus.isDirectory()) {
+        errMessage += "\r\n" +
+            "Warning: " + trashPath.toString() + " is not a directory";
+      }
+      if (!trashFileStatus.getPermission().equals(trashPermission)) {
+        errMessage += "\r\n" +
+            "Warning: the permission of " +
+            trashPath.toString() + " is not " + trashPermission;
+      }
+      throw new FileAlreadyExistsException(errMessage);
+    } catch (FileNotFoundException ignored) {
+      // no trash path
+    }
+
+    // Update the permission bits
+    mkdir(trashPath, trashPermission);
+    setPermission(trashPath, trashPermission);
   }
 
   @Override

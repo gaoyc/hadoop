@@ -400,6 +400,7 @@ public class NodeManager extends CompositeService
 
 
     ((NMContext)context).setContainerExecutor(exec);
+    ((NMContext)context).setDeletionService(del);
 
     nodeLabelsProvider = createNodeLabelsProvider(conf);
 
@@ -453,18 +454,15 @@ public class NodeManager extends CompositeService
     ((NMContext) context).setNodeStatusUpdater(nodeStatusUpdater);
     nmStore.setNodeStatusUpdater(nodeStatusUpdater);
 
-    super.serviceInit(conf);
-    // TODO add local dirs to del
-  }
-
-  @Override
-  protected void serviceStart() throws Exception {
+    // Do secure login before calling init for added services.
     try {
       doSecureLogin();
     } catch (IOException e) {
       throw new YarnRuntimeException("Failed NodeManager login", e);
     }
-    super.serviceStart();
+
+    super.serviceInit(conf);
+    // TODO add local dirs to del
   }
 
   @Override
@@ -611,6 +609,7 @@ public class NodeManager extends CompositeService
         logAggregationReportForApps;
     private NodeStatusUpdater nodeStatusUpdater;
     private final boolean isDistSchedulingEnabled;
+    private DeletionService deletionService;
 
     private OpportunisticContainerAllocator containerAllocator;
 
@@ -844,6 +843,24 @@ public class NodeManager extends CompositeService
     public void setResourcePluginManager(
         ResourcePluginManager resourcePluginManager) {
       this.resourcePluginManager = resourcePluginManager;
+    }
+
+    /**
+     * Return the NM's {@link DeletionService}.
+     *
+     * @return the NM's {@link DeletionService}.
+     */
+    public DeletionService getDeletionService() {
+      return this.deletionService;
+    }
+
+    /**
+     * Set the NM's {@link DeletionService}.
+     *
+     * @param deletionService the {@link DeletionService} to add to the Context.
+     */
+    public void setDeletionService(DeletionService deletionService) {
+      this.deletionService = deletionService;
     }
   }
 

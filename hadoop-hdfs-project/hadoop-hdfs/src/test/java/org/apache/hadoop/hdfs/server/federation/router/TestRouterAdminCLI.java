@@ -40,12 +40,15 @@ import org.apache.hadoop.hdfs.server.federation.store.protocol.GetMountTableEntr
 import org.apache.hadoop.hdfs.server.federation.store.records.MountTable;
 import org.apache.hadoop.hdfs.tools.federation.RouterAdmin;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.util.ToolRunner;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import com.google.common.base.Supplier;
 /**
  * Tests Router admin commands.
  */
@@ -313,9 +316,11 @@ public class TestRouterAdminCLI {
     RouterQuotaUsage quotaUsage = mountTable.getQuota();
 
     // verify the default quota set
-    assertEquals(0, quotaUsage.getFileAndDirectoryCount());
+    assertEquals(RouterQuotaUsage.QUOTA_USAGE_COUNT_DEFAULT,
+        quotaUsage.getFileAndDirectoryCount());
     assertEquals(HdfsConstants.QUOTA_DONT_SET, quotaUsage.getQuota());
-    assertEquals(0, quotaUsage.getSpaceConsumed());
+    assertEquals(RouterQuotaUsage.QUOTA_USAGE_COUNT_DEFAULT,
+        quotaUsage.getSpaceConsumed());
     assertEquals(HdfsConstants.QUOTA_DONT_SET, quotaUsage.getSpaceQuota());
 
     long nsQuota = 50;
@@ -334,6 +339,19 @@ public class TestRouterAdminCLI {
     assertEquals(nsQuota, quotaUsage.getQuota());
     assertEquals(ssQuota, quotaUsage.getSpaceQuota());
 
+    // use quota string for setting ss quota
+    String newSsQuota = "2m";
+    argv = new String[] {"-setQuota", src, "-ssQuota", newSsQuota};
+    assertEquals(0, ToolRunner.run(admin, argv));
+
+    stateStore.loadCache(MountTableStoreImpl.class, true);
+    getResponse = client.getMountTableManager()
+        .getMountTableEntries(getRequest);
+    mountTable = getResponse.getEntries().get(0);
+    quotaUsage = mountTable.getQuota();
+    // verify if ss quota is correctly set
+    assertEquals(2 * 1024 * 1024, quotaUsage.getSpaceQuota());
+
     // test clrQuota command
     argv = new String[] {"-clrQuota", src};
     assertEquals(0, ToolRunner.run(admin, argv));
@@ -347,5 +365,50 @@ public class TestRouterAdminCLI {
     // verify if quota unset successfully
     assertEquals(HdfsConstants.QUOTA_DONT_SET, quotaUsage.getQuota());
     assertEquals(HdfsConstants.QUOTA_DONT_SET, quotaUsage.getSpaceQuota());
+  }
+
+  @Test
+  public void testManageSafeMode() throws Exception {
+    // ensure the Router become RUNNING state
+    waitState(RouterServiceState.RUNNING);
+    assertFalse(routerContext.getRouter().getRpcServer().isInSafeMode());
+    assertEquals(0, ToolRunner.run(admin,
+        new String[] {"-safemode", "enter"}));
+    // verify state
+    assertEquals(RouterServiceState.SAFEMODE,
+        routerContext.getRouter().getRouterState());
+    assertTrue(routerContext.getRouter().getRpcServer().isInSafeMode());
+
+    System.setOut(new PrintStream(out));
+    assertEquals(0, ToolRunner.run(admin,
+        new String[] {"-safemode", "get"}));
+    assertTrue(out.toString().contains("true"));
+
+    assertEquals(0, ToolRunner.run(admin,
+        new String[] {"-safemode", "leave"}));
+    // verify state
+    assertEquals(RouterServiceState.RUNNING,
+        routerContext.getRouter().getRouterState());
+    assertFalse(routerContext.getRouter().getRpcServer().isInSafeMode());
+
+    out.reset();
+    assertEquals(0, ToolRunner.run(admin,
+        new String[] {"-safemode", "get"}));
+    assertTrue(out.toString().contains("false"));
+  }
+
+  /**
+   * Wait for the Router transforming to expected state.
+   * @param expectedState Expected Router state.
+   * @throws Exception
+   */
+  private void waitState(final RouterServiceState expectedState)
+      throws Exception {
+    GenericTestUtils.waitFor(new Supplier<Boolean>() {
+      @Override
+      public Boolean get() {
+        return expectedState == routerContext.getRouter().getRouterState();
+      }
+    }, 1000, 30000);
   }
 }

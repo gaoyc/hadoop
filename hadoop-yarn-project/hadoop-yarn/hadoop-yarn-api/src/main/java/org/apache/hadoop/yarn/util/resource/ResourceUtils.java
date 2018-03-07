@@ -84,20 +84,22 @@ public class ResourceUtils {
       Map<String, ResourceInformation> resourceInformationMap)
       throws YarnRuntimeException {
     /*
-     * Supporting 'memory' also as invalid resource name, in addition to
+     * Supporting 'memory', 'memory-mb', 'vcores' also as invalid resource names, in addition to
      * 'MEMORY' for historical reasons
      */
-    String key = "memory";
-    if (resourceInformationMap.containsKey(key)) {
-      LOG.warn(
-          "Attempt to define resource '" + key + "', but it is not allowed.");
-      throw new YarnRuntimeException(
-          "Attempt to re-define mandatory resource '" + key + "'.");
+    String keys[] = { "memory", ResourceInformation.MEMORY_URI,
+        ResourceInformation.VCORES_URI };
+    for(String key : keys) {
+      if (resourceInformationMap.containsKey(key)) {
+        LOG.warn("Attempt to define resource '" + key + "', but it is not allowed.");
+        throw new YarnRuntimeException(
+            "Attempt to re-define mandatory resource '" + key + "'.");
+      }
     }
 
     for (Map.Entry<String, ResourceInformation> mandatoryResourceEntry :
         ResourceInformation.MANDATORY_RESOURCES.entrySet()) {
-      key = mandatoryResourceEntry.getKey();
+      String key = mandatoryResourceEntry.getKey();
       ResourceInformation mandatoryRI = mandatoryResourceEntry.getValue();
 
       ResourceInformation newDefinedRI = resourceInformationMap.get(key);
@@ -199,9 +201,23 @@ public class ResourceUtils {
     }
   }
 
-  @VisibleForTesting
-  static void initializeResourcesMap(Configuration conf) {
+  /**
+   * Get maximum allocation from config, *THIS WILL NOT UPDATE INTERNAL DATA*
+   * @param conf config
+   * @return maximum allocation
+   */
+  public static Resource fetchMaximumAllocationFromConfig(Configuration conf) {
+    Map<String, ResourceInformation> resourceInformationMap =
+        getResourceInformationMapFromConfig(conf);
+    Resource ret = Resource.newInstance(0, 0);
+    for (ResourceInformation entry : resourceInformationMap.values()) {
+      ret.setResourceValue(entry.getName(), entry.getMaximumAllocation());
+    }
+    return ret;
+  }
 
+  private static Map<String, ResourceInformation> getResourceInformationMapFromConfig(
+      Configuration conf) {
     Map<String, ResourceInformation> resourceInformationMap = new HashMap<>();
     String[] resourceNames = conf.getStrings(YarnConfiguration.RESOURCE_TYPES);
 
@@ -247,6 +263,13 @@ public class ResourceUtils {
 
     setAllocationForMandatoryResources(resourceInformationMap, conf);
 
+    return resourceInformationMap;
+  }
+
+  @VisibleForTesting
+  static void initializeResourcesMap(Configuration conf) {
+    Map<String, ResourceInformation> resourceInformationMap =
+        getResourceInformationMapFromConfig(conf);
     initializeResourcesFromResourceInformationMap(resourceInformationMap);
   }
 
@@ -464,8 +487,8 @@ public class ResourceUtils {
         if (!initializedNodeResources) {
           Map<String, ResourceInformation> nodeResources = initializeNodeResourceInformation(
               conf);
-          addMandatoryResources(nodeResources);
           checkMandatoryResources(nodeResources);
+          addMandatoryResources(nodeResources);
           setAllocationForMandatoryResources(nodeResources, conf);
           readOnlyNodeResources = Collections.unmodifiableMap(nodeResources);
           initializedNodeResources = true;
@@ -544,19 +567,8 @@ public class ResourceUtils {
   public static Resource getResourceTypesMaximumAllocation() {
     Resource ret = Resource.newInstance(0, 0);
     for (ResourceInformation entry : resourceTypesArray) {
-      String name = entry.getName();
-      if (name.equals(ResourceInformation.MEMORY_MB.getName())) {
-        ret.setMemorySize(entry.getMaximumAllocation());
-      } else if (name.equals(ResourceInformation.VCORES.getName())) {
-        Long tmp = entry.getMaximumAllocation();
-        if (tmp > Integer.MAX_VALUE) {
-          tmp = (long) Integer.MAX_VALUE;
-        }
-        ret.setVirtualCores(tmp.intValue());
-        continue;
-      } else {
-        ret.setResourceValue(name, entry.getMaximumAllocation());
-      }
+      ret.setResourceValue(entry.getName(),
+          entry.getMaximumAllocation());
     }
     return ret;
   }

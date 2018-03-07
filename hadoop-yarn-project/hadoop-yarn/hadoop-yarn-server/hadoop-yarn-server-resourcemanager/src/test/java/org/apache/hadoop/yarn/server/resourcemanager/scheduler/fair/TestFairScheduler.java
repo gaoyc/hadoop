@@ -194,6 +194,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
 
   // TESTS
 
+  @SuppressWarnings("deprecation")
   @Test(timeout=2000)
   public void testLoadConfigurationOnInitialize() throws IOException {
     conf.setBoolean(FairSchedulerConfiguration.ASSIGN_MULTIPLE, true);
@@ -1053,7 +1054,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
 
     // Asked for less than increment allocation.
     assertEquals(
-        FairSchedulerConfiguration.DEFAULT_RM_SCHEDULER_INCREMENT_ALLOCATION_MB,
+        YarnConfiguration.DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB,
         scheduler.getQueueManager().getQueue("queue1").
             getResourceUsage().getMemorySize());
 
@@ -1279,7 +1280,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     List<ResourceRequest> asks = new ArrayList<ResourceRequest>();
     asks.add(createResourceRequest(2048, node2.getRackName(), 1, 1, false));
 
-    scheduler.allocate(attemptId, asks, new ArrayList<ContainerId>(), null,
+    scheduler.allocate(attemptId, asks, null, new ArrayList<ContainerId>(), null,
             null, NULL_UPDATE_REQUESTS);
 
     ApplicationAttemptId attId = createSchedulingRequest(2048, "queue1", "user1", 1);
@@ -2112,7 +2113,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     scheduler.start();
     scheduler.reinitialize(conf, resourceManager.getRMContext());
     int minReqSize =
-        FairSchedulerConfiguration.DEFAULT_RM_SCHEDULER_INCREMENT_ALLOCATION_MB;
+        YarnConfiguration.DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB;
 
     // First ask, queue1 requests 1 large (minReqSize * 2).
     ApplicationAttemptId id11 = createAppAttemptId(1, 1);
@@ -2124,7 +2125,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     ResourceRequest request1 = createResourceRequest(minReqSize * 2,
         ResourceRequest.ANY, 1, 1, true);
     ask1.add(request1);
-    scheduler.allocate(id11, ask1, new ArrayList<ContainerId>(),
+    scheduler.allocate(id11, ask1, null, new ArrayList<ContainerId>(),
         null, null, NULL_UPDATE_REQUESTS);
 
     // Second ask, queue2 requests 1 large.
@@ -2140,7 +2141,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
         ResourceRequest.ANY, 1, 1, false);
     ask2.add(request2);
     ask2.add(request3);
-    scheduler.allocate(id21, ask2, new ArrayList<ContainerId>(),
+    scheduler.allocate(id21, ask2, null, new ArrayList<ContainerId>(),
         null, null, NULL_UPDATE_REQUESTS);
 
     // Third ask, queue2 requests 2 small (minReqSize).
@@ -2156,7 +2157,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
         ResourceRequest.ANY, 2, 2, true);
     ask3.add(request4);
     ask3.add(request5);
-    scheduler.allocate(id22, ask3, new ArrayList<ContainerId>(),
+    scheduler.allocate(id22, ask3, null, new ArrayList<ContainerId>(),
         null, null, NULL_UPDATE_REQUESTS);
 
     scheduler.update();
@@ -2682,7 +2683,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     // Complete the first container so we can trigger allocation for app2
     ContainerId containerId =
         app1.getLiveContainers().iterator().next().getContainerId();
-    scheduler.allocate(app1.getApplicationAttemptId(), new ArrayList<>(),
+    scheduler.allocate(app1.getApplicationAttemptId(), new ArrayList<>(), null,
         Arrays.asList(containerId), null, null, NULL_UPDATE_REQUESTS);
 
     // Trigger allocation for app2
@@ -2768,7 +2769,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     asks.add(createResourceRequest(1024, node3.getRackName(), 1, 1, true));
     asks.add(createResourceRequest(1024, ResourceRequest.ANY, 1, 2, true));
 
-    scheduler.allocate(attemptId, asks, new ArrayList<ContainerId>(), null,
+    scheduler.allocate(attemptId, asks, null, new ArrayList<ContainerId>(), null,
         null, NULL_UPDATE_REQUESTS);
     
     // node 1 checks in
@@ -3215,7 +3216,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
         createResourceRequest(1024, node1.getHostName(), 1, 0, true),
         createResourceRequest(1024, "rack1", 1, 0, true),
         createResourceRequest(1024, ResourceRequest.ANY, 1, 1, true));
-    scheduler.allocate(attId1, update, new ArrayList<ContainerId>(),
+    scheduler.allocate(attId1, update, null, new ArrayList<ContainerId>(),
         null, null, NULL_UPDATE_REQUESTS);
     
     // then node2 should get the container
@@ -4410,6 +4411,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     verifyQueueNumRunnable("queue1.sub3", 0, 0);
   }
 
+  @SuppressWarnings("deprecation")
   @Test
   public void testSchedulingOnRemovedNode() throws Exception {
     // Disable continuous scheduling, will invoke continuous scheduling manually
@@ -4430,7 +4432,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
         createResourceRequest(1024, 8, ResourceRequest.ANY, 1, 1, true);
 
     ask1.add(request1);
-    scheduler.allocate(id11, ask1, new ArrayList<ContainerId>(), null,
+    scheduler.allocate(id11, ask1, null, new ArrayList<ContainerId>(), null,
         null, NULL_UPDATE_REQUESTS);
 
     String hostName = "127.0.0.1";
@@ -4506,11 +4508,11 @@ public class TestFairScheduler extends FairSchedulerTestBase {
 
     // Verify the blacklist can be updated independent of requesting containers
     scheduler.allocate(appAttemptId, Collections.<ResourceRequest>emptyList(),
-        Collections.<ContainerId>emptyList(),
+        null, Collections.<ContainerId>emptyList(),
         Collections.singletonList(host), null, NULL_UPDATE_REQUESTS);
     assertTrue(app.isPlaceBlacklisted(host));
     scheduler.allocate(appAttemptId, Collections.<ResourceRequest>emptyList(),
-        Collections.<ContainerId>emptyList(), null,
+        null, Collections.<ContainerId>emptyList(), null,
         Collections.singletonList(host), NULL_UPDATE_REQUESTS);
     assertFalse(scheduler.getSchedulerApp(appAttemptId)
         .isPlaceBlacklisted(host));
@@ -4519,8 +4521,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
         createResourceRequest(GB, node.getHostName(), 1, 0, true));
 
     // Verify a container does not actually get placed on the blacklisted host
-    scheduler.allocate(appAttemptId, update,
-        Collections.<ContainerId>emptyList(),
+    scheduler.allocate(appAttemptId, update, null, Collections.<ContainerId>emptyList(),
         Collections.singletonList(host), null, NULL_UPDATE_REQUESTS);
     assertTrue(app.isPlaceBlacklisted(host));
     scheduler.update();
@@ -4529,8 +4530,7 @@ public class TestFairScheduler extends FairSchedulerTestBase {
         .getLiveContainers().size());
 
     // Verify a container gets placed on the empty blacklist
-    scheduler.allocate(appAttemptId, update,
-        Collections.<ContainerId>emptyList(), null,
+    scheduler.allocate(appAttemptId, update, null, Collections.<ContainerId>emptyList(), null,
         Collections.singletonList(host), NULL_UPDATE_REQUESTS);
     assertFalse(app.isPlaceBlacklisted(host));
     createSchedulingRequest(GB, "root.default", "user", 1);
@@ -5389,8 +5389,8 @@ public class TestFairScheduler extends FairSchedulerTestBase {
     ask1.add(request3);
 
     // Perform allocation
-    scheduler.allocate(appAttemptId, ask1, new ArrayList<ContainerId>(), null,
-        null, NULL_UPDATE_REQUESTS);
+    scheduler.allocate(appAttemptId, ask1, null, new ArrayList<ContainerId>(),
+        null, null, NULL_UPDATE_REQUESTS);
     scheduler.update();
     scheduler.handle(new NodeUpdateSchedulerEvent(node));
 

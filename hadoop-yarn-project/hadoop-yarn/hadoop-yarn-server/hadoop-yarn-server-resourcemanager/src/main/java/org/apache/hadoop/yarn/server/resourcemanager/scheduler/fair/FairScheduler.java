@@ -40,6 +40,7 @@ import org.apache.hadoop.yarn.api.records.ReservationId;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.api.records.ResourceOption;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
+import org.apache.hadoop.yarn.api.records.SchedulingRequest;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.exceptions.YarnRuntimeException;
@@ -153,6 +154,7 @@ public class FairScheduler extends
   private final int UPDATE_DEBUG_FREQUENCY = 25;
   private int updatesToSkipForDebug = UPDATE_DEBUG_FREQUENCY;
 
+  @Deprecated
   @VisibleForTesting
   Thread schedulingThread;
 
@@ -167,15 +169,19 @@ public class FairScheduler extends
 
   protected boolean sizeBasedWeight; // Give larger weights to larger jobs
   // Continuous Scheduling enabled or not
+  @Deprecated
   protected boolean continuousSchedulingEnabled;
   // Sleep time for each pass in continuous scheduling
+  @Deprecated
   protected volatile int continuousSchedulingSleepMs;
   // Node available resource comparator
   private Comparator<FSSchedulerNode> nodeAvailableResourceComparator =
           new NodeAvailableResourceComparator();
   protected double nodeLocalityThreshold; // Cluster threshold for node locality
   protected double rackLocalityThreshold; // Cluster threshold for rack locality
+  @Deprecated
   protected long nodeLocalityDelayMs; // Delay for node locality
+  @Deprecated
   protected long rackLocalityDelayMs; // Delay for rack locality
   protected boolean assignMultiple; // Allocate multiple containers per
                                     // heartbeat
@@ -284,6 +290,7 @@ public class FairScheduler extends
    * Thread which attempts scheduling resources continuously,
    * asynchronous to the node heartbeats.
    */
+  @Deprecated
   private class ContinuousSchedulingThread extends Thread {
 
     @Override
@@ -389,18 +396,44 @@ public class FairScheduler extends
     return rackLocalityThreshold;
   }
 
+  /**
+   * Delay in milliseconds for locality fallback node to rack.
+   * @deprecated linked to {@link #isContinuousSchedulingEnabled} deprecation
+   * @return delay in ms
+   */
+  @Deprecated
   public long getNodeLocalityDelayMs() {
     return nodeLocalityDelayMs;
   }
 
+  /**
+   * Delay in milliseconds for locality fallback rack to other.
+   * @deprecated linked to {@link #isContinuousSchedulingEnabled} deprecation
+   * @return delay in ms
+   */
+  @Deprecated
   public long getRackLocalityDelayMs() {
     return rackLocalityDelayMs;
   }
 
+  /**
+   * Whether continuous scheduling is turned on.
+   * @deprecated Continuous scheduling should not be turned ON. It is
+   * deprecated because it can cause scheduler slowness due to locking issues.
+   * Schedulers should use assignmultiple as a replacement.
+   * @return whether continuous scheduling is enabled
+   */
+  @Deprecated
   public boolean isContinuousSchedulingEnabled() {
     return continuousSchedulingEnabled;
   }
 
+  /**
+   * The sleep time of the continuous scheduler thread.
+   * @deprecated linked to {@link #isContinuousSchedulingEnabled} deprecation
+   * @return sleep time in ms
+   */
+  @Deprecated
   public int getContinuousSchedulingSleepMs() {
     return continuousSchedulingSleepMs;
   }
@@ -463,15 +496,22 @@ public class FairScheduler extends
       applications.put(applicationId, application);
       queue.getMetrics().submitApp(user);
 
-        LOG.info("Accepted application " + applicationId + " from user: " + user
-            + ", in queue: " + queue.getName()
-            + ", currently num of applications: " + applications.size());
+      LOG.info("Accepted application " + applicationId + " from user: " + user
+          + ", in queue: " + queue.getName()
+          + ", currently num of applications: " + applications.size());
       if (isAppRecovering) {
         if (LOG.isDebugEnabled()) {
           LOG.debug(applicationId
               + " is recovering. Skip notifying APP_ACCEPTED");
         }
-      } else{
+      } else {
+        // During tests we do not always have an application object, handle
+        // it here but we probably should fix the tests
+        if (rmApp != null && rmApp.getApplicationSubmissionContext() != null) {
+          // Before we send out the event that the app is accepted is
+          // to set the queue in the submissionContext (needed on restore etc)
+          rmApp.getApplicationSubmissionContext().setQueue(queue.getName());
+        }
         rmContext.getDispatcher().getEventHandler().handle(
             new RMAppEvent(applicationId, RMAppEventType.APP_ACCEPTED));
       }
@@ -791,9 +831,9 @@ public class FairScheduler extends
 
   @Override
   public Allocation allocate(ApplicationAttemptId appAttemptId,
-      List<ResourceRequest> ask, List<ContainerId> release,
-      List<String> blacklistAdditions, List<String> blacklistRemovals,
-      ContainerUpdates updateRequests) {
+      List<ResourceRequest> ask, List<SchedulingRequest> schedulingRequests,
+      List<ContainerId> release, List<String> blacklistAdditions,
+      List<String> blacklistRemovals, ContainerUpdates updateRequests) {
 
     // Make sure this application exists
     FSAppAttempt application = getSchedulerApp(appAttemptId);
@@ -818,7 +858,9 @@ public class FairScheduler extends
     handleContainerUpdates(application, updateRequests);
 
     // Sanity check
-    normalizeRequests(ask);
+    normalizeResourceRequests(ask);
+
+    // TODO, normalize SchedulingRequest
 
     // Record container allocation start time
     application.recordContainerRequestTime(getClock().getTime());
@@ -840,6 +882,7 @@ public class FairScheduler extends
         // Update application requests
         application.updateResourceRequests(ask);
 
+        // TODO, handle SchedulingRequest
         application.showRequests();
       }
     } finally {
@@ -894,6 +937,7 @@ public class FairScheduler extends
     }
   }
 
+  @Deprecated
   void continuousSchedulingAttempt() throws InterruptedException {
     long start = getClock().getTime();
     List<FSSchedulerNode> nodeIdList;
@@ -1253,6 +1297,7 @@ public class FairScheduler extends
     this.rmContext = rmContext;
   }
 
+  @SuppressWarnings("deprecation")
   private void initScheduler(Configuration conf) throws IOException {
     try {
       writeLock.lock();
@@ -1299,6 +1344,10 @@ public class FairScheduler extends
       }
 
       if (continuousSchedulingEnabled) {
+        // Contiuous scheduling is deprecated log it on startup
+        LOG.warn("Continuous scheduling is turned ON. It is deprecated " +
+            "because it can cause scheduler slowness due to locking issues. " +
+            "Schedulers should use assignmultiple as a replacement.");
         // start continuous scheduling thread
         schedulingThread = new ContinuousSchedulingThread();
         schedulingThread.setName("FairSchedulerContinuousScheduling");
@@ -1374,6 +1423,7 @@ public class FairScheduler extends
     super.serviceStart();
   }
 
+  @SuppressWarnings("deprecation")
   @Override
   public void serviceStop() throws Exception {
     try {

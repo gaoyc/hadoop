@@ -1649,7 +1649,7 @@ public abstract class FileSystem extends Configured implements Closeable {
   /**
    * Mark a path to be deleted when its FileSystem is closed.
    * When the JVM shuts down cleanly, all cached FileSystem objects will be
-   * closed automatically —these the marked paths will be deleted as a result.
+   * closed automatically. These the marked paths will be deleted as a result.
    *
    * If a FileSystem instance is not cached, i.e. has been created with
    * {@link #createFileSystem(URI, Configuration)}, then the paths will
@@ -2058,7 +2058,7 @@ public abstract class FileSystem extends Configured implements Closeable {
    *  </dd>
    * </dl>
    *
-   * @param pathPattern a regular expression specifying a pth pattern
+   * @param pathPattern a glob specifying a path pattern
 
    * @return an array of paths that match the path pattern
    * @throws IOException IO failure
@@ -2072,7 +2072,7 @@ public abstract class FileSystem extends Configured implements Closeable {
    * {@code pathPattern} and is accepted by the user-supplied path filter.
    * Results are sorted by their path names.
    *
-   * @param pathPattern a regular expression specifying the path pattern
+   * @param pathPattern a glob specifying the path pattern
    * @param filter a user-supplied path filter
    * @return null if {@code pathPattern} has no glob and the path does not exist
    *         an empty array if {@code pathPattern} has a glob and no path

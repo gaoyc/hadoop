@@ -45,19 +45,29 @@ public class FairSchedulerConfiguration extends Configuration {
   public static final Log LOG = LogFactory.getLog(
       FairSchedulerConfiguration.class.getName());
 
-  /** Increment request grant-able by the RM scheduler.
-   * These properties are looked up in the yarn-site.xml.
-   * Kept for backward-compatibility - the new preferred way to configure the
-   * increment is the yarn.resource-types.{RESOURCE_NAME}.increment-allocation
-   * property, specifically: yarn.resource-types.memory-mb.increment-allocation
-   * for memory and yarn.resource-types.vcores.increment-allocation for CPU */
+  /**
+   * Resource Increment request grant-able by the FairScheduler.
+   * This property is looked up in the yarn-site.xml.
+   * @deprecated The preferred way to configure the increment is by using the
+   * yarn.resource-types.{RESOURCE_NAME}.increment-allocation property,
+   * for memory: yarn.resource-types.memory-mb.increment-allocation
+   */
   @Deprecated
   public static final String RM_SCHEDULER_INCREMENT_ALLOCATION_MB =
     YarnConfiguration.YARN_PREFIX + "scheduler.increment-allocation-mb";
+  @Deprecated
   public static final int DEFAULT_RM_SCHEDULER_INCREMENT_ALLOCATION_MB = 1024;
+  /**
+   * Resource Increment request grant-able by the FairScheduler.
+   * This property is looked up in the yarn-site.xml.
+   * @deprecated The preferred way to configure the increment is by using the
+   * yarn.resource-types.{RESOURCE_NAME}.increment-allocation property,
+   * for CPU: yarn.resource-types.vcores.increment-allocation
+   */
   @Deprecated
   public static final String RM_SCHEDULER_INCREMENT_ALLOCATION_VCORES =
     YarnConfiguration.YARN_PREFIX + "scheduler.increment-allocation-vcores";
+  @Deprecated
   public static final int DEFAULT_RM_SCHEDULER_INCREMENT_ALLOCATION_VCORES = 1;
 
   /** Threshold for container size for making a container reservation as a
@@ -97,20 +107,49 @@ public class FairSchedulerConfiguration extends Configuration {
   protected static final float  DEFAULT_LOCALITY_THRESHOLD_RACK =
 		  DEFAULT_LOCALITY_THRESHOLD;
 
-  /** Delay for node locality. */
-  protected static final String LOCALITY_DELAY_NODE_MS = CONF_PREFIX + "locality-delay-node-ms";
+  /**
+   * Delay for node locality.
+   * @deprecated Continuous scheduling is known to cause locking issue inside
+   * Only used when {@link #CONTINUOUS_SCHEDULING_ENABLED} is enabled
+   */
+  @Deprecated
+  protected static final String LOCALITY_DELAY_NODE_MS = CONF_PREFIX +
+      "locality-delay-node-ms";
+  @Deprecated
   protected static final long DEFAULT_LOCALITY_DELAY_NODE_MS = -1L;
 
-  /** Delay for rack locality. */
-  protected static final String LOCALITY_DELAY_RACK_MS = CONF_PREFIX + "locality-delay-rack-ms";
+  /**
+   * Delay for rack locality.
+   * @deprecated Continuous scheduling is known to cause locking issue inside
+   * Only used when {@link #CONTINUOUS_SCHEDULING_ENABLED} is enabled
+   */
+  @Deprecated
+  protected static final String LOCALITY_DELAY_RACK_MS = CONF_PREFIX +
+      "locality-delay-rack-ms";
+  @Deprecated
   protected static final long DEFAULT_LOCALITY_DELAY_RACK_MS = -1L;
 
-  /** Enable continuous scheduling or not. */
-  protected static final String CONTINUOUS_SCHEDULING_ENABLED = CONF_PREFIX + "continuous-scheduling-enabled";
+  /**
+   * Enable continuous scheduling or not.
+   * @deprecated Continuous scheduling is known to cause locking issue inside
+   * the scheduler in larger cluster, more than 100 nodes, use
+   * {@link #ASSIGN_MULTIPLE} to improve  container allocation ramp up.
+   */
+  @Deprecated
+  protected static final String CONTINUOUS_SCHEDULING_ENABLED = CONF_PREFIX +
+      "continuous-scheduling-enabled";
+  @Deprecated
   protected static final boolean DEFAULT_CONTINUOUS_SCHEDULING_ENABLED = false;
 
-  /** Sleep time of each pass in continuous scheduling (5ms in default) */
-  protected static final String CONTINUOUS_SCHEDULING_SLEEP_MS = CONF_PREFIX + "continuous-scheduling-sleep-ms";
+  /**
+   * Sleep time of each pass in continuous scheduling (5ms in default).
+   * @deprecated Continuous scheduling is known to cause locking issue inside
+   * Only used when {@link #CONTINUOUS_SCHEDULING_ENABLED} is enabled
+   */
+  @Deprecated
+  protected static final String CONTINUOUS_SCHEDULING_SLEEP_MS = CONF_PREFIX +
+      "continuous-scheduling-sleep-ms";
+  @Deprecated
   protected static final int DEFAULT_CONTINUOUS_SCHEDULING_SLEEP_MS = 5;
 
   /** Whether preemption is enabled. */
@@ -282,18 +321,45 @@ public class FairSchedulerConfiguration extends Configuration {
     return getFloat(LOCALITY_THRESHOLD_RACK, DEFAULT_LOCALITY_THRESHOLD_RACK);
   }
 
+  /**
+   * Whether continuous scheduling is turned on.
+   * @deprecated use {@link #ASSIGN_MULTIPLE} to improve container allocation
+   * ramp up.
+   * @return whether continuous scheduling is enabled
+   */
+  @Deprecated
   public boolean isContinuousSchedulingEnabled() {
-    return getBoolean(CONTINUOUS_SCHEDULING_ENABLED, DEFAULT_CONTINUOUS_SCHEDULING_ENABLED);
+    return getBoolean(CONTINUOUS_SCHEDULING_ENABLED,
+        DEFAULT_CONTINUOUS_SCHEDULING_ENABLED);
   }
 
+  /**
+   * The sleep time of the continuous scheduler thread.
+   * @deprecated linked to {@link #CONTINUOUS_SCHEDULING_ENABLED} deprecation
+   * @return sleep time in ms
+   */
+  @Deprecated
   public int getContinuousSchedulingSleepMs() {
-    return getInt(CONTINUOUS_SCHEDULING_SLEEP_MS, DEFAULT_CONTINUOUS_SCHEDULING_SLEEP_MS);
+    return getInt(CONTINUOUS_SCHEDULING_SLEEP_MS,
+        DEFAULT_CONTINUOUS_SCHEDULING_SLEEP_MS);
   }
 
+  /**
+   * Delay in milliseconds for locality fallback node to rack.
+   * @deprecated linked to {@link #CONTINUOUS_SCHEDULING_ENABLED} deprecation
+   * @return delay in ms
+   */
+  @Deprecated
   public long getLocalityDelayNodeMs() {
     return getLong(LOCALITY_DELAY_NODE_MS, DEFAULT_LOCALITY_DELAY_NODE_MS);
   }
 
+  /**
+   * Delay in milliseconds for locality fallback rack to other.
+   * @deprecated linked to {@link #CONTINUOUS_SCHEDULING_ENABLED} deprecation
+   * @return delay in ms
+   */
+  @Deprecated
   public long getLocalityDelayRackMs() {
     return getLong(LOCALITY_DELAY_RACK_MS, DEFAULT_LOCALITY_DELAY_RACK_MS);
   }

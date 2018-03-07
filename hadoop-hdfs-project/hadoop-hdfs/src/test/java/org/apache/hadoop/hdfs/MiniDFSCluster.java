@@ -1332,7 +1332,7 @@ public class MiniDFSCluster implements AutoCloseable {
     try {
       uri = new URI("hdfs://" + hostPort);
     } catch (URISyntaxException e) {
-      NameNode.LOG.warn("unexpected URISyntaxException: " + e );
+      NameNode.LOG.warn("unexpected URISyntaxException", e);
     }
     return uri;
   }
@@ -2745,7 +2745,8 @@ public class MiniDFSCluster implements AutoCloseable {
     final DataNode dn = dataNodes.get(dataNodeIndex).datanode;
     final FsDatasetSpi<?> dataSet = DataNodeTestUtils.getFSDataset(dn);
     if (!(dataSet instanceof SimulatedFSDataset)) {
-      throw new IOException("injectBlocks is valid only for SimilatedFSDataset");
+      throw new IOException("injectBlocks is valid only for" +
+          " SimulatedFSDataset");
     }
     if (bpid == null) {
       bpid = getNamesystem().getBlockPoolId();
@@ -2766,7 +2767,8 @@ public class MiniDFSCluster implements AutoCloseable {
     final DataNode dn = dataNodes.get(dataNodeIndex).datanode;
     final FsDatasetSpi<?> dataSet = DataNodeTestUtils.getFSDataset(dn);
     if (!(dataSet instanceof SimulatedFSDataset)) {
-      throw new IOException("injectBlocks is valid only for SimilatedFSDataset");
+      throw new IOException("injectBlocks is valid only for" +
+          " SimulatedFSDataset");
     }
     String bpid = getNamesystem(nameNodeIndex).getBlockPoolId();
     SimulatedFSDataset sdataset = (SimulatedFSDataset) dataSet;
@@ -2984,6 +2986,29 @@ public class MiniDFSCluster implements AutoCloseable {
   public static File getBlockFile(File storageDir, ExtendedBlock blk) {
     return new File(DatanodeUtil.idToBlockDir(getFinalizedDir(storageDir,
         blk.getBlockPoolId()), blk.getBlockId()), blk.getBlockName());
+  }
+
+  /**
+   * Return all block files in given directory (recursive search).
+   */
+  public static List<File> getAllBlockFiles(File storageDir) {
+    List<File> results = new ArrayList<File>();
+    File[] files = storageDir.listFiles();
+    if (files == null) {
+      return null;
+    }
+    for (File f : files) {
+      if (f.getName().startsWith(Block.BLOCK_FILE_PREFIX) &&
+          !f.getName().endsWith(Block.METADATA_EXTENSION)) {
+        results.add(f);
+      } else if (f.isDirectory()) {
+        List<File> subdirResults = getAllBlockFiles(f);
+        if (subdirResults != null) {
+          results.addAll(subdirResults);
+        }
+      }
+    }
+    return results;
   }
 
   /**

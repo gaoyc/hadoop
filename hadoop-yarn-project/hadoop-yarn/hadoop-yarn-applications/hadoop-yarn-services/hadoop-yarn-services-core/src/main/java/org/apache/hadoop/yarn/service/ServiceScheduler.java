@@ -40,6 +40,7 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.service.CompositeService;
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
+import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
@@ -96,6 +97,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.apache.hadoop.fs.FileSystem.FS_DEFAULT_NAME_KEY;
 import static org.apache.hadoop.registry.client.api.RegistryConstants.*;
+import static org.apache.hadoop.yarn.api.records.ContainerExitStatus.KILLED_AFTER_APP_COMPLETION;
 import static org.apache.hadoop.yarn.service.api.ServiceApiConstants.*;
 import static org.apache.hadoop.yarn.service.component.ComponentEventType.*;
 
@@ -253,6 +255,13 @@ public class ServiceScheduler extends CompositeService {
   public void serviceStop() throws Exception {
     LOG.info("Stopping service scheduler");
 
+    // Mark component-instances/containers as STOPPED
+    if (YarnConfiguration.timelineServiceV2Enabled(getConfig())) {
+      for (ContainerId containerId : getLiveInstances().keySet()) {
+        serviceTimelinePublisher.componentInstanceFinished(containerId,
+            KILLED_AFTER_APP_COMPLETION, diagnostics.toString());
+      }
+    }
     if (executorService != null) {
       executorService.shutdownNow();
     }
@@ -262,13 +271,10 @@ public class ServiceScheduler extends CompositeService {
       serviceTimelinePublisher
           .serviceAttemptUnregistered(context, diagnostics.toString());
     }
-    String msg = diagnostics.toString()
-        + "Navigate to the failed component for more details.";
-    amRMClient
-        .unregisterApplicationMaster(FinalApplicationStatus.ENDED, msg, "");
-    LOG.info("Service " + app.getName()
-        + " unregistered with RM, with attemptId = " + context.attemptId
-        + ", diagnostics = " + diagnostics);
+    amRMClient.unregisterApplicationMaster(FinalApplicationStatus.ENDED,
+        diagnostics.toString(), "");
+    LOG.info("Service {} unregistered with RM, with attemptId = {} " +
+        ", diagnostics = {} ", app.getName(), context.attemptId, diagnostics);
     super.serviceStop();
   }
 
@@ -355,17 +361,22 @@ public class ServiceScheduler extends CompositeService {
         amRMClient.releaseAssignedContainer(container.getId());
       }
     }
-
+    ApplicationId appId = ApplicationId.fromString(app.getId());
     existingRecords.forEach((encodedContainerId, record) -> {
       String componentName = record.get(YarnRegistryAttributes.YARN_COMPONENT);
       if (componentName != null) {
         Component component = componentsByName.get(componentName);
-        ComponentInstance compInstance = component.getComponentInstance(
-            record.description);
-        ContainerId containerId = ContainerId.fromString(record.get(
-            YarnRegistryAttributes.YARN_ID));
-        unRecoveredInstances.put(containerId, compInstance);
-        component.removePendingInstance(compInstance);
+        if (component != null) {
+          ComponentInstance compInstance = component.getComponentInstance(
+              record.description);
+          ContainerId containerId = ContainerId.fromString(record.get(
+              YarnRegistryAttributes.YARN_ID));
+          if (containerId.getApplicationAttemptId().getApplicationId()
+              .equals(appId)) {
+            unRecoveredInstances.put(containerId, compInstance);
+            component.removePendingInstance(compInstance);
+          }
+        }
       }
     });
 
@@ -395,14 +406,9 @@ public class ServiceScheduler extends CompositeService {
     // ZK
     globalTokens.put(ServiceApiConstants.CLUSTER_ZK_QUORUM, getConfig()
         .getTrimmed(KEY_REGISTRY_ZK_QUORUM, DEFAULT_REGISTRY_ZK_QUORUM));
-    String user = null;
-    try {
-      user = UserGroupInformation.getCurrentUser().getShortUserName();
-    } catch (IOException e) {
-      LOG.error("Failed to get user.", e);
-    }
-    globalTokens
-        .put(SERVICE_ZK_PATH, ServiceRegistryUtils.mkClusterPath(user, app.getName()));
+    String user = RegistryUtils.currentUser();
+    globalTokens.put(SERVICE_ZK_PATH,
+        ServiceRegistryUtils.mkServiceHomePath(user, app.getName()));
 
     globalTokens.put(ServiceApiConstants.USER, user);
     String dnsDomain = getConfig().getTrimmed(KEY_DNS_DOMAIN);

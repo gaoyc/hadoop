@@ -26,6 +26,7 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.crypto.CryptoProtocolVersion;
 import org.apache.hadoop.fs.BatchedRemoteIterator.BatchedEntries;
+import org.apache.hadoop.fs.PathIsNotEmptyDirectoryException;
 import org.apache.hadoop.hdfs.AddBlockFlag;
 import org.apache.hadoop.fs.CacheFlag;
 import org.apache.hadoop.fs.ContentSummary;
@@ -625,6 +626,8 @@ public interface ClientProtocol {
    * @throws org.apache.hadoop.fs.UnresolvedLinkException If <code>src</code>
    *           contains a symlink
    * @throws SnapshotAccessControlException if path is in RO snapshot
+   * @throws PathIsNotEmptyDirectoryException if path is a non-empty directory
+   *           and <code>recursive</code> is set to false
    * @throws IOException If an I/O error occurred
    */
   @AtMostOnce
@@ -1305,8 +1308,7 @@ public interface ClientProtocol {
       String fromSnapshot, String toSnapshot) throws IOException;
 
   /**
-   * Get the difference between two snapshots, or between a snapshot and the
-   * current tree of a directory.
+   * Get the difference between two snapshots of a directory iteratively.
    *
    * @param snapshotRoot
    *          full path of the directory where snapshots are taken

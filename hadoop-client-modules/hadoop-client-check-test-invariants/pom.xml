@@ -110,6 +110,15 @@
                         <ignoreClass>*</ignoreClass>
                       </ignoreClasses>
                     </dependency>
+
+                    <dependency>
+                      <groupId>org.apache.hadoop</groupId>
+                      <artifactId>hadoop-client-minicluster</artifactId>
+                      <ignoreClasses>
+                        <ignoreClass>*</ignoreClass>
+                      </ignoreClasses>
+                    </dependency>
+
                   </dependencies>
                 </banDuplicateClasses>
               </rules>

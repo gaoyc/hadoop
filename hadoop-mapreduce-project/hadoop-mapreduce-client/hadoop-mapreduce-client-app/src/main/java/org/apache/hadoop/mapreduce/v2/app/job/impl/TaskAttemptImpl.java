@@ -869,7 +869,7 @@ public abstract class TaskAttemptImpl implements
         return initialClasspath;
       }
       Map<String, String> env = new HashMap<String, String>();
-      MRApps.setClasspath(env, conf);
+      MRApps.setClasspath(env, conf); //真正设置获取MRApps的classpath
       initialClasspath = env.get(Environment.CLASSPATH.name());
       initialAppClasspath = env.get(Environment.APP_CLASSPATH.name());
       initialClasspathFlag.set(true);
@@ -901,19 +901,19 @@ public abstract class TaskAttemptImpl implements
     ByteBuffer taskCredentialsBuffer = ByteBuffer.wrap(new byte[]{});
     try {
 
-      configureJobJar(conf, localResources);
+      configureJobJar(conf, localResources); // 配置job到jar
 
-      configureJobConf(conf, localResources, oldJobId);
+      configureJobConf(conf, localResources, oldJobId); // 配置job到conf
 
       // Setup DistributedCache
-      MRApps.setupDistributedCache(conf, localResources);
+      MRApps.setupDistributedCache(conf, localResources); // 创建DistributedCache
 
       taskCredentialsBuffer =
           configureTokens(jobToken, credentials, serviceData);
 
       addExternalShuffleProviders(conf, serviceData);
 
-      environment = configureEnv(conf);
+      environment = configureEnv(conf); //配置container启动环境, 包括启动脚本
 
     } catch (IOException e) {
       throw new YarnRuntimeException(e);
@@ -933,7 +933,7 @@ public abstract class TaskAttemptImpl implements
       throws IOException {
     Map<String, String> environment = new HashMap<String, String>();
     MRApps.addToEnvironment(environment, Environment.CLASSPATH.name(),
-        getInitialClasspath(conf), conf);
+        getInitialClasspath(conf), conf); // 初始化container的classpath
 
     if (initialAppClasspath != null) {
       MRApps.addToEnvironment(environment, Environment.APP_CLASSPATH.name(),
@@ -1084,7 +1084,7 @@ public abstract class TaskAttemptImpl implements
       }
     }
   }
-
+  /** by kigo: 创建ContainerLaunchContext,包括真正到启动脚本 **/
   static ContainerLaunchContext createContainerLaunchContext(
       Map<ApplicationAccessType, String> applicationACLs,
       Configuration conf, Token<JobTokenIdentifier> jobToken, Task remoteTask,

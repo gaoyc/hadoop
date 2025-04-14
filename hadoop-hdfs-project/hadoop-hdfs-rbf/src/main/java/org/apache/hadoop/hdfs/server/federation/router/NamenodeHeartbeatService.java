@@ -140,6 +140,7 @@ public class NamenodeHeartbeatService extends PeriodicService {
 
     this.nameserviceId = nsId;
     this.namenodeId = nnId;
+
   }
 
   /**
@@ -201,7 +202,7 @@ public class NamenodeHeartbeatService extends PeriodicService {
 
     // Get the Web address for UI
     this.webAddress =
-        DFSUtil.getNamenodeWebAddr(conf, nameserviceId, originalNnId);
+        DFSUtil.getNamenodeWebAddr(conf, nameserviceId, originalNnId);  //by kigo: 需要修改内部调用支持RBF支持自研+华为纳管
 
     if (resolvedHost != null) {
       // Get the addresses from resolvedHost plus the configured ports.
@@ -228,8 +229,12 @@ public class NamenodeHeartbeatService extends PeriodicService {
     this.connectionFactory =
         URLConnectionFactory.newDefaultURLConnectionFactory(conf);
 
+    //by kigo: RBF纳管适配华为R6.5，兼容SSL验证策略
+    this.connectionFactory.setSkipSSLVerification(true);
+
     this.scheme =
-        DFSUtil.getHttpPolicy(conf).isHttpEnabled() ? "http" : "https";
+        //DFSUtil.getHttpPolicy(conf).isHttpEnabled() ? "http" : "https";  //by kigo: 需要修改调用支持RBF支持自研+华为纳管
+        DFSUtil.getHttpPolicy(conf, nameserviceId).isHttpEnabled() ? "http" : "https";
 
     this.setIntervalMs(conf.getLong(
         DFS_ROUTER_HEARTBEAT_INTERVAL_MS,
@@ -583,6 +588,12 @@ public class NamenodeHeartbeatService extends PeriodicService {
               jsonObject.optLong("ScheduledReplicationBlocks"));
         } else if (name.equals(
             "Hadoop:service=NameNode,name=FSNamesystem")) {
+
+          //modify at 20250225: 适配自研3.1安全版本纳管，兼容低版本接口
+          int PendingSPSPaths = 0;
+          if(jsonObject.has("PendingSPSPaths")) {
+            PendingSPSPaths = jsonObject.getInt("PendingSPSPaths");
+          }
           report.setNamesystemInfo(
               jsonObject.getLong("CapacityRemaining"),
               jsonObject.getLong("CapacityTotal"),
@@ -593,7 +604,9 @@ public class NamenodeHeartbeatService extends PeriodicService {
               jsonObject.getLong("UnderReplicatedBlocks"),
               jsonObject.getLong("PendingDeletionBlocks"),
               jsonObject.optLong("ProvidedCapacityTotal"),
-              jsonObject.getInt("PendingSPSPaths"));
+              PendingSPSPaths
+          );
+          //end modify at 20250225: 适配自研3.1安全版本纳管，兼容低版本接口
         }
       }
     }
@@ -608,4 +621,6 @@ public class NamenodeHeartbeatService extends PeriodicService {
     }
     super.serviceStop();
   }
+
+
 }

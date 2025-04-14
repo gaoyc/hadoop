@@ -175,7 +175,7 @@ public class JMXJsonServlet extends HttpServlet {
   @Override
   public void doGet(HttpServletRequest request, HttpServletResponse response) {
     try {
-      if (!isInstrumentationAccessAllowed(request, response)) {
+      if (!isInstrumentationAccessAllowed(request, response)) { //by kigo: 对接华为RR6.5问题排查，入口待定
         return;
       }
       JsonGenerator jg = null;

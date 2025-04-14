@@ -19,9 +19,7 @@
 package org.apache.hadoop.hdfs.web;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLConnection;
+import java.net.*;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
@@ -35,6 +33,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.hadoop.classification.VisibleForTesting;
+
+import javax.net.ssl.*;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
 
 /**
  * Utilities for handling URLs
@@ -50,6 +53,16 @@ public class URLConnectionFactory {
    */
   public final static int DEFAULT_SOCKET_TIMEOUT = 60 * 1000; // 1 minute
   private final ConnectionConfigurator connConfigurator;
+
+  //by kigo: 增加ssl验证标识，适配RBF纳管华为R6.5集群
+  private static volatile boolean sslVerificationDisabled = false;
+
+  private boolean skipSSLVerification = false;
+
+  public void setSkipSSLVerification(boolean enabled) {
+    this.skipSSLVerification = enabled;
+  }
+  // end by kigo
 
   private static final ConnectionConfigurator DEFAULT_TIMEOUT_CONN_CONFIGURATOR
       = new ConnectionConfigurator() {
@@ -178,6 +191,17 @@ public class URLConnectionFactory {
    */
   public URLConnection openConnection(URL url, boolean isSpnego)
       throws IOException, AuthenticationException {
+    // 全局禁用
+    // if (url.getProtocol().equalsIgnoreCase("https")) {
+    // 按需禁用
+    if (skipSSLVerification && "https".equalsIgnoreCase(url.getProtocol())) {
+      try {
+        LOG.debug("---disableSSLVerification for connection {}", url);
+        disableSSLVerification(); // 确保 HTTPS 跳过验证
+      } catch (Exception e) {
+        throw new IOException("Failed to disable SSL verification", e);
+      }
+    }
     if (isSpnego) {
       LOG.debug("open AuthenticatedURL connection {}", url);
       UserGroupInformation.getCurrentUser().checkTGTAndReloginFromKeytab();
@@ -214,5 +238,34 @@ public class URLConnectionFactory {
     if (connConfigurator instanceof SSLConnectionConfigurator) {
       ((SSLConnectionConfigurator) connConfigurator).destroy();
     }
+  }
+
+  /**
+   * by kigo: 禁用SSL证书验证。纳管适配华为R6.5集群SSL验证需要
+   */
+  public static void disableSSLVerification() throws NoSuchAlgorithmException, KeyManagementException {
+
+    // 全局禁用 SSL 验证（只需调用一次）
+    if (sslVerificationDisabled) {
+      return; // 避免重复初始化
+    }
+
+    TrustManager[] trustAllCerts = new TrustManager[]{
+        new X509TrustManager() {
+          public X509Certificate[] getAcceptedIssuers() {
+            return null;
+          }
+          public void checkClientTrusted(X509Certificate[] certs, String authType) {
+          }
+          public void checkServerTrusted(X509Certificate[] certs, String authType) {
+          }
+        }
+    };
+    SSLContext sslContext = SSLContext.getInstance("SSL");  //TLS
+    sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+    HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+    HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+
+    sslVerificationDisabled = true;
   }
 }

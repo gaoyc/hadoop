@@ -1468,7 +1468,8 @@ public class DFSUtil {
 
     String webAddrBaseKey = DFSConfigKeys.DFS_NAMENODE_HTTP_ADDRESS_KEY;
     String webAddrDefault = DFSConfigKeys.DFS_NAMENODE_HTTP_ADDRESS_DEFAULT;
-    if (getHttpPolicy(conf) == HttpConfig.Policy.HTTPS_ONLY) {
+    //if (getHttpPolicy(conf) == HttpConfig.Policy.HTTPS_ONLY) { // by kigo : 改写判断，支持RBF纳管自研+华为场景，支持扩展配置，子集群可自定义配置，支持：HttpConfig.Policy + nsId
+    if (getHttpPolicy(conf, nsId) == HttpConfig.Policy.HTTPS_ONLY) {
       webAddrBaseKey = DFSConfigKeys.DFS_NAMENODE_HTTPS_ADDRESS_KEY;
       webAddrDefault = DFSConfigKeys.DFS_NAMENODE_HTTPS_ADDRESS_DEFAULT;
     }
@@ -1610,6 +1611,24 @@ public class DFSUtil {
     if (policy == null) {
       throw new HadoopIllegalArgumentException("Unrecognized value '"
           + policyStr + "' for " + DFSConfigKeys.DFS_HTTP_POLICY_KEY);
+    }
+
+    conf.set(DFSConfigKeys.DFS_HTTP_POLICY_KEY, policy.name());
+    return policy;
+  }
+
+  // by kigo:getHttpPolicy方法仅全局一个配置，多个子集群如自研+华为不一致，则会不不匹配底层子集群实际情况，需要改造支持扩展配置，子集群可自定义配置，支持：HttpConfig.Policy + nsId
+  public static HttpConfig.Policy getHttpPolicy(Configuration conf, String subNsid) {
+    String policyStrKey = DFSUtilClient.concatSuffixes(
+            DFSConfigKeys.DFS_HTTP_POLICY_KEY, subNsid);
+
+    String policyStr = conf.get(policyStrKey,
+            DFSConfigKeys.DFS_HTTP_POLICY_DEFAULT);
+
+    HttpConfig.Policy policy = HttpConfig.Policy.fromString(policyStr);
+    if (policy == null) {
+      throw new HadoopIllegalArgumentException("Unrecognized value '"
+              + policyStr + "' for " + DFSConfigKeys.DFS_HTTP_POLICY_KEY);
     }
 
     conf.set(DFSConfigKeys.DFS_HTTP_POLICY_KEY, policy.name());

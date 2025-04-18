@@ -17,6 +17,7 @@
 */
 package org.apache.hadoop.security.ssl;
 
+import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
@@ -28,12 +29,15 @@ import org.slf4j.LoggerFactory;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.text.MessageFormat;
 import java.util.Timer;
+
+import java.security.cert.X509Certificate;
 
 /**
  * {@link KeyStoresFactory} implementation that reads the certificates from
@@ -94,6 +98,11 @@ public class FileBasedKeyStoresFactory implements KeyStoresFactory {
    * of the truststore or keystore certificates file has changed and needs reloading.
    */
   public static final int DEFAULT_SSL_STORES_RELOAD_INTERVAL = 10000;
+
+  //by kigo: RBF纳管华为R6.5+自研安全集群，增加SSL安全认证参数
+  public static final String SSL_REQUIRE_SERVER_CERT_KEY =
+          "hadoop.ssl.require.server.cert";
+  public static final boolean SSL_REQUIRE_SERVER_CERT_DEFAULT = false;
 
   private Configuration conf;
   private KeyManager[] keyManagers;
@@ -274,8 +283,8 @@ public class FileBasedKeyStoresFactory implements KeyStoresFactory {
       KeyStore keystore = KeyStore.getInstance(keystoreType);
       keystore.load(null, null);
       KeyManagerFactory keyMgrFactory = KeyManagerFactory
-              .getInstance(SSLFactory.SSLCERTIFICATE);
-
+              .getInstance(SSLFactory.SSLCERTIFICATE);  //v3.3.6
+//              .getInstance(SSLFactory.KEY_MANAGER_SSLCERTIFICATE);  //v3.4.1
       keyMgrFactory.init(keystore, null);
       keyManagers = keyMgrFactory.getKeyManagers();
     }
@@ -291,11 +300,31 @@ public class FileBasedKeyStoresFactory implements KeyStoresFactory {
     if (!truststoreLocation.isEmpty()) {
       createTrustManagersFromConfiguration(mode, truststoreType, truststoreLocation, storesReloadInterval);
     } else {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("The property '" + locationProperty + "' has not been set, " +
-            "no TrustStore will be loaded");
+      // by kigo: 禁用SSL证书验证。纳管适配华为R6.5集群SSL验证需要
+      boolean requireServerCert = conf.getBoolean(SSL_REQUIRE_SERVER_CERT_KEY, SSL_REQUIRE_SERVER_CERT_DEFAULT);
+      LOG.info("---The property: hadoop.ssl.require.server.cert="+requireServerCert);
+      if(!requireServerCert){
+        TrustManager[] trustAllCerts = new TrustManager[]{
+                new X509TrustManager() {
+                  public X509Certificate[] getAcceptedIssuers() {
+                    return null;
+                  }
+                  public void checkClientTrusted(X509Certificate[] certs, String authType) {
+                  }
+                  public void checkServerTrusted(X509Certificate[] certs, String authType) {
+                  }
+                }
+        };
+
+        trustManagers = trustAllCerts;
+        LOG.info("---set to requireServerCert, trustManagers:"+ ToStringBuilder.reflectionToString(trustManagers));
+      }else{
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("The property '" + locationProperty + "' has not been set, " +
+                  "no TrustStore will be loaded");
+        }
+        trustManagers = null;
       }
-      trustManagers = null;
     }
   }
 

@@ -340,6 +340,17 @@ public class SaslRpcClient {
                 + confPrincipal);
       }
       if (!serverPrincipal.equals(confPrincipal)) {
+        // modify at 20250213 : 适配安全互信集群验证，如果包含@ream部分，忽略@ream进行二次判断
+        if(serverPrincipal.contains("@") || confPrincipal.contains("@")){
+          // 获取@之前的部分
+          String part1 = serverPrincipal.split("@")[0];
+          String part2 = confPrincipal.split("@")[0];
+          LOG.warn("Server has invalid Kerberos principal:"+serverPrincipal+" confPrincipal:"+confPrincipal+", but have the save non @ream part, ant pass it");
+          // 如果比较前@ream半部分一致，即通过返回
+          return serverPrincipal;
+        }
+        // modify at 20250213 END
+
         throw new IllegalArgumentException(String.format(
             "Server has invalid Kerberos principal: %s, expecting: %s",
             serverPrincipal, confPrincipal));

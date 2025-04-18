@@ -47,7 +47,7 @@ public class SSLConnectionConfigurator implements ConnectionConfigurator {
   SSLConnectionConfigurator(int connectTimeout, int readTimeout,
       Configuration conf) throws IOException, GeneralSecurityException {
     factory = new SSLFactory(SSLFactory.Mode.CLIENT, conf);
-    factory.init();
+    factory.init(); //by Kigo: 初始化SSLContext相关，需要覆盖ssl机构验证
     sf = factory.createSSLSocketFactory();
     hv = factory.getHostnameVerifier();
     this.connectTimeout = connectTimeout;

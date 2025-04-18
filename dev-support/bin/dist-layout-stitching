@@ -13,16 +13,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-
 # project.version
 VERSION=$1
-
 # project.build.directory
 BASEDIR=$2
 
-function run()
-{
+function run() {
+
   declare res
 
   echo "\$ ${*}"

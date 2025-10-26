@@ -20,6 +20,7 @@ package org.apache.hadoop.hdfs.server.federation.router;
 import static org.apache.hadoop.hdfs.client.HdfsClientConfigKeys.DFS_CLIENT_SERVER_DEFAULTS_VALIDITY_PERIOD_MS_DEFAULT;
 import static org.apache.hadoop.hdfs.client.HdfsClientConfigKeys.DFS_CLIENT_SERVER_DEFAULTS_VALIDITY_PERIOD_MS_KEY;
 import static org.apache.hadoop.hdfs.server.federation.router.FederationUtil.updateMountPointStatus;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.crypto.CryptoProtocolVersion;
 import org.apache.hadoop.fs.BatchedRemoteIterator.BatchedEntries;
@@ -593,6 +594,43 @@ public class RouterClientProtocol implements ClientProtocol {
 
     final List<RemoteLocation> srcLocations =
         rpcServer.getLocationsForPath(src, true, false);
+
+    // by Kigo at 20250825: 针对hbase新老共存大合并场景定制修改, 自动创建分区目录
+    // 数据表，meta表, trash创建父目录
+    if(src.contains(".tmp") || dst.contains(".Trash") || dst.contains("archive") || src.contains("WALs")){
+
+      RemoteMethod method = new RemoteMethod("mkdirs",
+              new Class<?>[] {String.class, FsPermission.class, boolean.class},
+              new RemoteParam(), FsPermission.getDefault(), true);
+
+//      final List<RemoteLocation> locations =
+//              rpcServer.getLocationsForPath(dst, false);
+
+      String ns = srcLocations.get(0).getNameserviceId();
+      String dstParent = new Path(dst).getParent().toString();
+
+      // 注意spath网关路径是否可能与目标dpath不一致，后续需要考虑兼容增加
+      RemoteLocation destLoc = new RemoteLocation(ns, dstParent, dstParent);
+
+      //at 20250827 归档目录, .Trash全部子集群创建
+      if(dst.contains("archive") || dst.contains(".Trash")) {
+        List<RemoteLocation> remoteLocations = new LinkedList<>();
+        for (RemoteLocation location : srcLocations) {
+//          String nsDst = dst.replaceAll(src, location.getDest()); //命名空间
+//          String nsDstParent = StringUtils.substringBeforeLast(nsDst, "/");
+          remoteLocations.add(new RemoteLocation(location.getNameserviceId(), dstParent, dstParent));
+        }
+        LOG.info("---rbf rename enhance, auto mkdir hbase archive or trash path,src:{}, dst:{}, srcLocations:{}, remoteLocations:{}", src, dst, new ObjectMapper().writeValueAsString(srcLocations),new ObjectMapper().writeValueAsString(remoteLocations));
+        rpcClient.invokeAll(remoteLocations, method);
+      }else{
+
+        LOG.info("---rbf rename enhance, auto mkdir hbase path, src: {}, src-nn:{}, dst: {}, dstParent:{}, destLoc:{}", srcLocations.get(0), ns, dst, dstParent, destLoc);
+        rpcClient.invokeSingle(destLoc, method, Boolean.class);
+//      mkdirs(dstParent, FsPermission.getDefault(), true); //会创建在其它子集群
+      }
+
+    }
+
     // srcLocations may be trimmed by getRenameDestinations()
     final List<RemoteLocation> locs = new LinkedList<>(srcLocations);
     RemoteParam dstParam = getRenameDestinations(locs, dst);
@@ -621,6 +659,43 @@ public class RouterClientProtocol implements ClientProtocol {
         rpcServer.getLocationsForPath(src, true, false);
     // srcLocations may be trimmed by getRenameDestinations()
     final List<RemoteLocation> locs = new LinkedList<>(srcLocations);
+
+    // by Kigo at 20250825: 针对hbase新老共存大合并场景定制修改, 自动创建分区目录
+    // 数据表，meta表, trash创建父目录
+    if(src.contains(".tmp") || dst.contains(".Trash") || dst.contains("archive") || src.contains("WALs")){
+
+      RemoteMethod method = new RemoteMethod("mkdirs",
+              new Class<?>[] {String.class, FsPermission.class, boolean.class},
+              new RemoteParam(), FsPermission.getDefault(), true);
+
+//      final List<RemoteLocation> locations =
+//              rpcServer.getLocationsForPath(dst, false);
+
+      String ns = srcLocations.get(0).getNameserviceId();
+      String dstParent = new Path(dst).getParent().toString();
+
+      // 注意spath网关路径是否可能与目标dpath不一致，后续需要考虑兼容增加
+      RemoteLocation destLoc = new RemoteLocation(ns, dstParent, dstParent);
+
+      //at 20250827 归档目录, .Trash全部子集群创建
+      if(dst.contains("archive") || dst.contains(".Trash")) {
+        List<RemoteLocation> remoteLocations = new LinkedList<>();
+        for (RemoteLocation location : srcLocations) {
+//          String nsDst = dst.replaceAll(src, location.getDest()); //命名空间
+//          String nsDstParent = StringUtils.substringBeforeLast(nsDst, "/");
+          remoteLocations.add(new RemoteLocation(location.getNameserviceId(), dstParent, dstParent));
+        }
+        LOG.info("---rbf rename enhance, auto mkdir hbase archive or trash path,src:{}, dst:{}, srcLocations:{}, remoteLocations:{}", src, dst, new ObjectMapper().writeValueAsString(srcLocations),new ObjectMapper().writeValueAsString(remoteLocations));
+        rpcClient.invokeAll(remoteLocations, method);
+      }else{
+
+        LOG.info("---rbf rename enhance, auto mkdir hbase path, src: {}, src-nn:{}, dst: {}, dstParent:{}, destLoc:{}", srcLocations.get(0), ns, dst, dstParent, destLoc);
+        rpcClient.invokeSingle(destLoc, method, Boolean.class);
+//      mkdirs(dstParent, FsPermission.getDefault(), true); //会创建在其它子集群
+      }
+
+    }
+
     RemoteParam dstParam = getRenameDestinations(locs, dst);
     if (locs.isEmpty()) {
       throw new IOException(
@@ -735,6 +810,7 @@ public class RouterClientProtocol implements ClientProtocol {
         HdfsFileStatus fileStatus = getFileInfo(src);
         if (fileStatus != null) {
           // When existing, the NN doesn't return an exception; return true
+          LOG.debug("---this directory already exists, src:{}, fileStatus:{}", src,fileStatus);
           return true;
         }
       } catch (IOException ioe) {
@@ -746,6 +822,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     final RemoteLocation firstLocation = locations.get(0);
     try {
+      LOG.debug("---mkdir src:{}, ns:{}, firstLocation:{}", src, firstLocation.getNameserviceId(), firstLocation);
       return rpcClient.invokeSingle(firstLocation, method, Boolean.class);
     } catch (IOException ioe) {
       final List<RemoteLocation> newLocations = checkFaultTolerantRetry(

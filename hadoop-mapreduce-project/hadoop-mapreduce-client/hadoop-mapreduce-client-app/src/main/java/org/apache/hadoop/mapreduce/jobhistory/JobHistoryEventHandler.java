@@ -312,7 +312,7 @@ public class JobHistoryEventHandler extends AbstractService
     // if timeline service is enabled.
     if (handleTimelineEvent) {
       atsEventDispatcher = createDispatcher();
-      EventHandler<JobHistoryEvent> timelineEventHandler =
+      EventHandler<JobHistoryEvent> timelineEventHandler =  // by kigo: timeline相关的处理线程
           new ForwardingEventHandler();
       atsEventDispatcher.register(EventType.class, timelineEventHandler);
       atsEventDispatcher.setDrainEventsOnStop();
@@ -659,9 +659,9 @@ public class JobHistoryEventHandler extends AbstractService
               + event.getHistoryEvent().getEventType());
         }
       } catch (IOException e) {
-        LOG.error("Error writing History Event: " + event.getHistoryEvent(),
-            e);
-        throw new YarnRuntimeException(e);
+        LOG.error("Error writing History Event: " + event.getHistoryEvent(),  //by kigo: ALL Datanodes ...... are bad, Aboring 出时报错
+            e);　// evet 类型是　jobhistory.TaskAttempStartedEvent@2c33b42
+        throw new YarnRuntimeException(e); // line: 664 => 443 =>
       }
 
       if (event.getHistoryEvent().getEventType() == EventType.JOB_SUBMITTED) {
@@ -735,7 +735,7 @@ public class JobHistoryEventHandler extends AbstractService
     }
   }
 
-  private void handleTimelineEvent(JobHistoryEvent event) {
+  private void handleTimelineEvent(JobHistoryEvent event) { //by kigo: 真正推送timeline　server操作
     HistoryEvent historyEvent = event.getHistoryEvent();
     if (handleTimelineEvent) {
       if (timelineV2Client != null) {

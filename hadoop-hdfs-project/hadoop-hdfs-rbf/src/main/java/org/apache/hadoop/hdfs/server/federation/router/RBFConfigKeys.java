@@ -323,4 +323,9 @@ public class RBFConfigKeys extends CommonConfigurationKeysPublic {
   public static final Class<? extends AbstractDelegationTokenSecretManager>
       DFS_ROUTER_DELEGATION_TOKEN_DRIVER_CLASS_DEFAULT =
       ZKDelegationTokenSecretManagerImpl.class;
+
+  //rename操作是否自动创建目录
+  public static final String DFS_ROUTER_EXTEND_RENAME_AUTODIRS =
+          FEDERATION_ROUTER_PREFIX + "extend.rename.autodirs";
+  public static final boolean DFS_ROUTER_EXTEND_RENAME_AUTODIRS_ENABLED_DEFAULT = false;
 }

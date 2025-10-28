@@ -158,6 +158,8 @@ public class RouterClientProtocol implements ClientProtocol {
   /** Router security manager to handle token operations. */
   private RouterSecurityManager securityManager = null;
 
+  private boolean isAutoMkdirsWhenRaname = false;
+
   RouterClientProtocol(Configuration conf, RouterRpcServer rpcServer) {
     this.rpcServer = rpcServer;
     this.rpcClient = rpcServer.getRPCClient();
@@ -191,6 +193,9 @@ public class RouterClientProtocol implements ClientProtocol {
     this.snapshotProto = new RouterSnapshot(rpcServer);
     this.routerCacheAdmin = new RouterCacheAdmin(rpcServer);
     this.securityManager = rpcServer.getRouterSecurityManager();
+    //RBF扩展新增：
+    this.isAutoMkdirsWhenRaname = conf.getBoolean(RBFConfigKeys.DFS_ROUTER_EXTEND_RENAME_AUTODIRS,RBFConfigKeys.DFS_ROUTER_EXTEND_RENAME_AUTODIRS_ENABLED_DEFAULT);
+    LOG.info("---rbf enhance, isAutoMkdirsWhenRaname, config: {}, value: {}", RBFConfigKeys.DFS_ROUTER_EXTEND_RENAME_AUTODIRS, isAutoMkdirsWhenRaname);
   }
 
   @Override
@@ -597,38 +602,42 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // by Kigo at 20250825: 针对hbase新老共存大合并场景定制修改, 自动创建分区目录
     // 数据表，meta表, trash创建父目录
-    if(src.contains(".tmp") || dst.contains(".Trash") || dst.contains("archive") || src.contains("WALs")){
+//    rpcServer.getConfig().get();
+    if(isAutoMkdirsWhenRaname) {
+      if (src.contains(".tmp") || dst.contains(".Trash") || dst.contains("archive") || src.contains("WALs")) {
 
-      RemoteMethod method = new RemoteMethod("mkdirs",
-              new Class<?>[] {String.class, FsPermission.class, boolean.class},
-              new RemoteParam(), FsPermission.getDefault(), true);
+        RemoteMethod method = new RemoteMethod("mkdirs",
+                new Class<?>[]{String.class, FsPermission.class, boolean.class},
+                new RemoteParam(), FsPermission.getDefault(), true);
 
 //      final List<RemoteLocation> locations =
 //              rpcServer.getLocationsForPath(dst, false);
 
-      String ns = srcLocations.get(0).getNameserviceId();
-      String dstParent = new Path(dst).getParent().toString();
+        String ns = srcLocations.get(0).getNameserviceId();
+        String dstParent = new Path(dst).getParent().toString();
 
-      // 注意spath网关路径是否可能与目标dpath不一致，后续需要考虑兼容增加
-      RemoteLocation destLoc = new RemoteLocation(ns, dstParent, dstParent);
+        // 注意spath网关路径是否可能与目标dpath不一致，后续需要考虑兼容增加
+        RemoteLocation destLoc = new RemoteLocation(ns, dstParent, dstParent);
 
-      //at 20250827 归档目录, .Trash全部子集群创建
-      if(dst.contains("archive") || dst.contains(".Trash")) {
-        List<RemoteLocation> remoteLocations = new LinkedList<>();
-        for (RemoteLocation location : srcLocations) {
+        //at 20250827 归档目录, .Trash全部子集群创建
+
+        if (dst.contains("archive") || dst.contains(".Trash")) {
+          List<RemoteLocation> remoteLocations = new LinkedList<>();
+          for (RemoteLocation location : srcLocations) {
 //          String nsDst = dst.replaceAll(src, location.getDest()); //命名空间
 //          String nsDstParent = StringUtils.substringBeforeLast(nsDst, "/");
-          remoteLocations.add(new RemoteLocation(location.getNameserviceId(), dstParent, dstParent));
-        }
-        LOG.info("---rbf rename enhance, auto mkdir hbase archive or trash path,src:{}, dst:{}, srcLocations:{}, remoteLocations:{}", src, dst, new ObjectMapper().writeValueAsString(srcLocations),new ObjectMapper().writeValueAsString(remoteLocations));
-        rpcClient.invokeAll(remoteLocations, method);
-      }else{
+            remoteLocations.add(new RemoteLocation(location.getNameserviceId(), dstParent, dstParent));
+          }
+          LOG.debug("---rbf rename enhance, auto mkdir hbase archive or trash path,src:{}, dst:{}, srcLocations:{}, remoteLocations:{}", src, dst, new ObjectMapper().writeValueAsString(srcLocations), new ObjectMapper().writeValueAsString(remoteLocations));
+          rpcClient.invokeAll(remoteLocations, method);
+        } else {//其它路径只在rename后目标位置创建
 
-        LOG.info("---rbf rename enhance, auto mkdir hbase path, src: {}, src-nn:{}, dst: {}, dstParent:{}, destLoc:{}", srcLocations.get(0), ns, dst, dstParent, destLoc);
-        rpcClient.invokeSingle(destLoc, method, Boolean.class);
+          LOG.debug("---rbf rename enhance, auto mkdir hbase path, src: {}, src-nn:{}, dst: {}, dstParent:{}, destLoc:{}", srcLocations.get(0), ns, dst, dstParent, destLoc);
+          rpcClient.invokeSingle(destLoc, method, Boolean.class);
 //      mkdirs(dstParent, FsPermission.getDefault(), true); //会创建在其它子集群
-      }
+        }
 
+      }
     }
 
     // srcLocations may be trimmed by getRenameDestinations()
@@ -662,36 +671,38 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // by Kigo at 20250825: 针对hbase新老共存大合并场景定制修改, 自动创建分区目录
     // 数据表，meta表, trash创建父目录
-    if(src.contains(".tmp") || dst.contains(".Trash") || dst.contains("archive") || src.contains("WALs")){
+    if(isAutoMkdirsWhenRaname){
+      if(src.contains(".tmp") || dst.contains(".Trash") || dst.contains("archive") || src.contains("WALs")) {
 
-      RemoteMethod method = new RemoteMethod("mkdirs",
-              new Class<?>[] {String.class, FsPermission.class, boolean.class},
-              new RemoteParam(), FsPermission.getDefault(), true);
+        RemoteMethod method = new RemoteMethod("mkdirs",
+                new Class<?>[]{String.class, FsPermission.class, boolean.class},
+                new RemoteParam(), FsPermission.getDefault(), true);
 
-//      final List<RemoteLocation> locations =
-//              rpcServer.getLocationsForPath(dst, false);
+  //      final List<RemoteLocation> locations =
+  //              rpcServer.getLocationsForPath(dst, false);
 
-      String ns = srcLocations.get(0).getNameserviceId();
-      String dstParent = new Path(dst).getParent().toString();
+        String ns = srcLocations.get(0).getNameserviceId();
+        String dstParent = new Path(dst).getParent().toString();
 
-      // 注意spath网关路径是否可能与目标dpath不一致，后续需要考虑兼容增加
-      RemoteLocation destLoc = new RemoteLocation(ns, dstParent, dstParent);
+        // 注意spath网关路径是否可能与目标dpath不一致，后续需要考虑兼容增加
+        RemoteLocation destLoc = new RemoteLocation(ns, dstParent, dstParent);
 
-      //at 20250827 归档目录, .Trash全部子集群创建
-      if(dst.contains("archive") || dst.contains(".Trash")) {
-        List<RemoteLocation> remoteLocations = new LinkedList<>();
-        for (RemoteLocation location : srcLocations) {
-//          String nsDst = dst.replaceAll(src, location.getDest()); //命名空间
-//          String nsDstParent = StringUtils.substringBeforeLast(nsDst, "/");
-          remoteLocations.add(new RemoteLocation(location.getNameserviceId(), dstParent, dstParent));
+        //at 20250827 归档目录, .Trash全部子集群创建
+        if (dst.contains("archive") || dst.contains(".Trash")) {
+          List<RemoteLocation> remoteLocations = new LinkedList<>();
+          for (RemoteLocation location : srcLocations) {
+  //          String nsDst = dst.replaceAll(src, location.getDest()); //命名空间
+  //          String nsDstParent = StringUtils.substringBeforeLast(nsDst, "/");
+            remoteLocations.add(new RemoteLocation(location.getNameserviceId(), dstParent, dstParent));
+          }
+          LOG.debug("---rbf rename enhance, auto mkdir hbase archive or trash path,src:{}, dst:{}, srcLocations:{}, remoteLocations:{}", src, dst, new ObjectMapper().writeValueAsString(srcLocations), new ObjectMapper().writeValueAsString(remoteLocations));
+          rpcClient.invokeAll(remoteLocations, method);
+        } else {
+
+          LOG.debug("---rbf rename enhance, auto mkdir hbase path, src: {}, src-nn:{}, dst: {}, dstParent:{}, destLoc:{}", srcLocations.get(0), ns, dst, dstParent, destLoc);
+          rpcClient.invokeSingle(destLoc, method, Boolean.class);
+  //      mkdirs(dstParent, FsPermission.getDefault(), true); //会创建在其它子集群
         }
-        LOG.info("---rbf rename enhance, auto mkdir hbase archive or trash path,src:{}, dst:{}, srcLocations:{}, remoteLocations:{}", src, dst, new ObjectMapper().writeValueAsString(srcLocations),new ObjectMapper().writeValueAsString(remoteLocations));
-        rpcClient.invokeAll(remoteLocations, method);
-      }else{
-
-        LOG.info("---rbf rename enhance, auto mkdir hbase path, src: {}, src-nn:{}, dst: {}, dstParent:{}, destLoc:{}", srcLocations.get(0), ns, dst, dstParent, destLoc);
-        rpcClient.invokeSingle(destLoc, method, Boolean.class);
-//      mkdirs(dstParent, FsPermission.getDefault(), true); //会创建在其它子集群
       }
 
     }
